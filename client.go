@@ -40,6 +40,7 @@ type Client struct {
 	Headers           map[string]string
 	EncodingBase64    bool
 	EventID           string
+	bufferSize        int
 	disconnectcb      ConnCallback
 	ResponseValidator ResponseValidator
 	ReconnectStrategy backoff.BackOff
@@ -54,6 +55,17 @@ func NewClient(url string) *Client {
 		Connection: &http.Client{},
 		Headers:    make(map[string]string),
 		subscribed: make(map[chan *Event]chan bool),
+	}
+}
+
+// NewClientWithBufferSize creates a new client with custom buffer size
+func NewClientWithBufferSize(url string, bufferSize int) *Client {
+	return &Client{
+		URL:        url,
+		Connection: &http.Client{},
+		Headers:    make(map[string]string),
+		subscribed: make(map[chan *Event]chan bool),
+		bufferSize: bufferSize,
 	}
 }
 
@@ -80,7 +92,7 @@ func (c *Client) SubscribeWithContext(ctx context.Context, stream string, handle
 		}
 		defer resp.Body.Close()
 
-		reader := NewEventStreamReader(resp.Body)
+		reader := NewEventStreamReaderWithBufferSize(resp.Body, c.bufferSize)
 		eventChan, errorChan := c.startReadLoop(reader)
 
 		for {
@@ -138,7 +150,7 @@ func (c *Client) SubscribeChanWithContext(ctx context.Context, stream string, ch
 			connected = true
 		}
 
-		reader := NewEventStreamReader(resp.Body)
+		reader := NewEventStreamReaderWithBufferSize(resp.Body, c.bufferSize)
 		eventChan, errorChan := c.startReadLoop(reader)
 
 		for {

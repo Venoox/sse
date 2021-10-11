@@ -5,7 +5,9 @@
 package sse
 
 import (
+	"bufio"
 	"fmt"
+	"math/rand"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -30,6 +32,15 @@ var mldata = `{
 	]
 }`
 
+var longMessage = randomString(bufio.MaxScanTokenSize + 10000)
+
+func randomString(length int) string {
+	rand.Seed(time.Now().UnixNano())
+	b := make([]byte, length)
+	rand.Read(b)
+	return fmt.Sprintf("%x", b)[:length]
+}
+
 func setup(empty bool) {
 	// New Server
 	srv = newServer()
@@ -41,6 +52,12 @@ func setupMultiline() {
 	srv = newServer()
 	srv.SplitData = true
 	go publishMultilineMessages(srv, 100000000)
+}
+
+func setupLongMessages() {
+	srv = newServer()
+	srv.SplitData = true
+	go publishLongMessages(srv, 100000000)
 }
 
 func setupCount(empty bool, count int) {
@@ -91,6 +108,12 @@ func publishMsgs(s *Server, empty bool, count int) {
 func publishMultilineMessages(s *Server, count int) {
 	for a := 0; a < count; a++ {
 		s.Publish("test", &Event{ID: []byte("123456"), Data: []byte(mldata)})
+	}
+}
+
+func publishLongMessages(s *Server, count int) {
+	for a := 0; a < count; a++ {
+		s.Publish("test", &Event{ID: []byte("123456"), Data: []byte(longMessage)})
 	}
 }
 
@@ -148,6 +171,33 @@ func TestClientSubscribeMultiline(t *testing.T) {
 		msg, err := wait(events, time.Second*1)
 		require.Nil(t, err)
 		assert.Equal(t, []byte(mldata), msg)
+	}
+
+	assert.Nil(t, cErr)
+}
+
+func TestClientSubscribeLongMessages(t *testing.T) {
+	setupLongMessages()
+	defer cleanup()
+
+	c := NewClientWithBufferSize(url, len(longMessage)+1000)
+
+	events := make(chan *Event)
+	var cErr error
+
+	go func() {
+		cErr = c.Subscribe("test", func(msg *Event) {
+			if msg.Data != nil {
+				events <- msg
+				return
+			}
+		})
+	}()
+
+	for i := 0; i < 5; i++ {
+		msg, err := wait(events, time.Second*1)
+		require.Nil(t, err)
+		assert.Equal(t, []byte(longMessage), msg)
 	}
 
 	assert.Nil(t, cErr)
